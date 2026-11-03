@@ -1,4 +1,3 @@
-
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -9,8 +8,9 @@ public class MouseLook : MonoBehaviour
 
     private float pitch = 0f;
 
-    void Start()
+    void OnEnable()
     {
+        // Re-lock whenever look is (re)enabled, e.g. after a conversation closes.
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
     }
@@ -18,6 +18,23 @@ public class MouseLook : MonoBehaviour
     void Update()
     {
         if (Mouse.current == null)
+            return;
+
+        // Optional: release the mouse when pressing Escape, click to grab it again.
+        if (Keyboard.current != null &&
+            Keyboard.current.escapeKey.wasPressedThisFrame)
+        {
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+        }
+        else if (Cursor.lockState != CursorLockMode.Locked &&
+                 Mouse.current.leftButton.wasPressedThisFrame)
+        {
+            Cursor.lockState = CursorLockMode.Locked;
+            Cursor.visible = false;
+        }
+
+        if (Cursor.lockState != CursorLockMode.Locked)
             return;
 
         Vector2 mouseDelta = Mouse.current.delta.ReadValue();
@@ -39,14 +56,6 @@ public class MouseLook : MonoBehaviour
         {
             cameraTransform.localRotation =
                 Quaternion.Euler(pitch, 0f, 0f);
-        }
-
-        // Optional: release the mouse when pressing Escape.
-        if (Keyboard.current != null &&
-            Keyboard.current.escapeKey.wasPressedThisFrame)
-        {
-            Cursor.lockState = CursorLockMode.None;
-            Cursor.visible = true;
         }
     }
 }

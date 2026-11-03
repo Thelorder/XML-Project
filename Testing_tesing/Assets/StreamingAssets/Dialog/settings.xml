@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<GameSettings xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+              xsi:noNamespaceSchemaLocation="Schemas/settings.xsd">
+  <Ollama url="http://localhost:11434" keepAlive="30m"/>
+  <!-- Creative and varied: plays the character -->
+  <Actor model="gemma4:e4b" temperature="0.8" contextLength="8192" maxTokens="200"/>
+  <!-- Strict and repeatable: scores the conversation -->
+  <Evaluator model="gemma4:e4b" temperature="0.1" contextLength="8192" maxTokens="1024"/>
+</GameSettings>

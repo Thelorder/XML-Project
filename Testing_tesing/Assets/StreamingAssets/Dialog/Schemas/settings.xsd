@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Schema for StreamingAssets/Dialog/settings.xml: which local models to use and how. -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+
+  <xs:simpleType name="Temperature">
+    <xs:restriction base="xs:decimal">
+      <xs:minInclusive value="0"/>
+      <xs:maxInclusive value="2"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:complexType name="ModelRoleType">
+    <xs:attribute name="model" type="xs:string" use="required"/>
+    <xs:attribute name="temperature" type="Temperature" use="required"/>
+    <!-- Context window in tokens (Ollama num_ctx) -->
+    <xs:attribute name="contextLength" type="xs:positiveInteger" default="8192"/>
+    <!-- Upper bound for one reply (Ollama num_predict) -->
+    <xs:attribute name="maxTokens" type="xs:positiveInteger" default="256"/>
+  </xs:complexType>
+
+  <xs:element name="GameSettings">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="Ollama">
+          <xs:complexType>
+            <xs:attribute name="url" type="xs:anyURI" use="required"/>
+            <!-- How long Ollama keeps the model in VRAM after the last request, e.g. "30m" -->
+            <xs:attribute name="keepAlive" type="xs:string" default="30m"/>
+          </xs:complexType>
+        </xs:element>
+        <!-- Plays the character -->
+        <xs:element name="Actor" type="ModelRoleType"/>
+        <!-- Scores the player's communication -->
+        <xs:element name="Evaluator" type="ModelRoleType"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>
