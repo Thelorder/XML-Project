@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Behaviour taxonomy for the turn analyzer. After every player message the Analyzer LLM
+  labels it with zero or more of these behaviours; the game then adds the rapport points.
+  Characters can override the points in their own <BehaviourOverrides>.
+-->
+<Analysis xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:noNamespaceSchemaLocation="Schemas/analysis.xsd">
+  <Behaviours>
+    <!-- ===== Positive ===== -->
+    <Behaviour id="reflects" polarity="positive" rapport="4" criterion="active_listening">
+      <Description>Paraphrases or reflects back what the other person said or felt, showing it was understood.</Description>
+      <Example>So it's the quiet, careful part of the game you like most?</Example>
+      <Example>Sounds like the last few weeks have been really heavy for you.</Example>
+    </Behaviour>
+    <Behaviour id="follow_up" polarity="positive" rapport="3" criterion="active_listening">
+      <Description>Builds on something specific the other person just said, instead of starting a new topic.</Description>
+      <Example>You mentioned a club - how long have you been playing there?</Example>
+    </Behaviour>
+    <Behaviour id="open_question" polarity="positive" rapport="2" criterion="question_quality">
+      <Description>Asks an open question that invites more than a yes/no answer.</Description>
+      <Example>What got you into old maps in the first place?</Example>
+    </Behaviour>
+    <Behaviour id="acknowledges_emotion" polarity="positive" rapport="5" criterion="empathy">
+      <Description>Names or acknowledges a feeling the other person expressed or hinted at.</Description>
+      <Example>That sounds exhausting, honestly.</Example>
+    </Behaviour>
+    <Behaviour id="validates" polarity="positive" rapport="3" criterion="empathy">
+      <Description>Accepts the other person's view or feeling as reasonable, without arguing or fixing.</Description>
+      <Example>It makes sense that you'd want some quiet after a week like that.</Example>
+    </Behaviour>
+    <Behaviour id="self_disclosure" polarity="positive" rapport="2" criterion="clarity">
+      <Description>Shares something genuine and relevant about themselves that fits the moment, without taking over the conversation.</Description>
+      <Example>I used to play a bit as a kid, but I never got past the openings.</Example>
+    </Behaviour>
+
+    <!-- ===== Negative ===== -->
+    <Behaviour id="unsolicited_advice" polarity="negative" rapport="-5" criterion="boundaries">
+      <Description>Tells the other person what they should do when they did not ask for advice.</Description>
+      <Example>You should just ask your boss for a week off.</Example>
+      <Example>Have you tried meditation? It would really help.</Example>
+    </Behaviour>
+    <Behaviour id="changes_subject" polarity="negative" rapport="-3" criterion="active_listening">
+      <Description>Abruptly switches to an unrelated topic, leaving what the other person said hanging.</Description>
+      <Example>Anyway, did you see the match last night?</Example>
+    </Behaviour>
+    <Behaviour id="ignores" polarity="negative" rapport="-4" criterion="active_listening">
+      <Description>Does not respond to a question or point the other person just made.</Description>
+    </Behaviour>
+    <!-- autoMaxWords: the model misses "ok"/"cool" too often, so very short non-questions are tagged by the game -->
+    <Behaviour id="low_effort" polarity="negative" rapport="-3" criterion="clarity" autoMaxWords="3">
+      <Description>A very short, generic or empty reply that adds nothing ("ok", "cool", "nice", "lol").</Description>
+      <Example>ok</Example>
+      <Example>cool cool</Example>
+    </Behaviour>
+    <Behaviour id="dismissive" polarity="negative" rapport="-5" criterion="empathy">
+      <Description>Minimises or brushes off the other person's feelings, interests or experience.</Description>
+      <Example>It's just a game, why get so worked up about it?</Example>
+      <Example>Everyone's tired, that's just life.</Example>
+    </Behaviour>
+    <Behaviour id="judgmental" polarity="negative" rapport="-4" criterion="empathy">
+      <Description>Criticises or labels the other person or their choices.</Description>
+      <Example>Living alone with a cat at 28 is kind of sad, no?</Example>
+    </Behaviour>
+    <Behaviour id="pushy_personal" polarity="negative" rapport="-4" criterion="boundaries">
+      <Description>Asks intrusive personal questions (family, love life, money) too early or presses after a deflection.</Description>
+      <Example>So why are you single?</Example>
+    </Behaviour>
+    <Behaviour id="self_centered" polarity="negative" rapport="-2" criterion="active_listening">
+      <Description>Turns the conversation to themselves at length, ignoring the other person.</Description>
+      <Example>That reminds me of my own job, which is way worse, let me tell you about my boss...</Example>
+    </Behaviour>
+    <Behaviour id="hostile" polarity="negative" rapport="-10" criterion="boundaries">
+      <Description>Insults, mocks, threatens or is openly rude.</Description>
+      <Example>Wow, you're boring.</Example>
+    </Behaviour>
+
+    <!-- ===== Character-dependent ===== -->
+    <Behaviour id="flirting" polarity="neutral" rapport="0" criterion="boundaries">
+      <Description>Compliments the other person's looks or makes romantic or suggestive remarks.</Description>
+      <Example>You have really pretty eyes, you know that?</Example>
+    </Behaviour>
+    <Behaviour id="humor" polarity="neutral" rapport="1" criterion="clarity">
+      <Description>A light, friendly joke or playful remark.</Description>
+    </Behaviour>
+  </Behaviours>
+
+  <Scoring maxTurnChange="15">
+    <!-- Bringing up her interest helps once; mentioning it every line is not more interesting -->
+    <Trigger well="3" repeatWell="0" badly="-4"/>
+    <Boundary low="-3" medium="-6" high="-10"/>
+    <Cue noticed="6" missed="-3"/>
+  </Scoring>
+
+  <Moods>
+    <Cold>You feel put off by this person. Keep your answers short and guarded, and do not share anything personal.</Cold>
+    <Neutral>You are still making up your mind about this person. Be polite and answer in your usual way.</Neutral>
+    <Warm>You are starting to like this person and feel comfortable. Open up a little more, share a personal detail and show curiosity about them.</Warm>
+    <LastWarning>They have already crossed your boundaries before. If it happens again you will end the conversation.</LastWarning>
+    <Leave>They crossed your boundaries again. End the conversation now with one short, cool sentence and say goodbye. Do not ask any question.</Leave>
+  </Moods>
+</Analysis>

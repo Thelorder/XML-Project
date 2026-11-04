@@ -30,7 +30,9 @@
         </xs:element>
         <!-- Plays the character -->
         <xs:element name="Actor" type="ModelRoleType"/>
-        <!-- Scores the player's communication -->
+        <!-- Labels each player message for the live rapport bar -->
+        <xs:element name="Analyzer" type="ModelRoleType"/>
+        <!-- Scores the whole conversation at the end -->
         <xs:element name="Evaluator" type="ModelRoleType"/>
       </xs:sequence>
     </xs:complexType>

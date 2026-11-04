@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using UnityEngine;
 
@@ -13,14 +14,13 @@ namespace Dialog
         public static DialogManager Instance { get; private set; }
 
         public ChatUI UI { get; private set; }
-        public GameSettings Settings { get; private set; }
-        public IReadOnlyList<CharacterDefinition> Characters => characters;
+        public GameData Data { get; private set; }
+        public GameSettings Settings => Data.Settings;
         public bool IsInConversation => current != null;
 
         // Disabled while a conversation is open.
         [SerializeField] private Behaviour[] playerControls;
 
-        List<CharacterDefinition> characters = new List<CharacterDefinition>();
         OllamaClient client;
         ConversationSession current;
 
@@ -29,16 +29,18 @@ namespace Dialog
             Instance = this;
             UI = GetComponent<ChatUI>();
 
+            DialogLog.Info = message => Debug.Log("[Dialog] " + message);
+            DialogLog.Warning = message => Debug.LogWarning("[Dialog] " + message);
+
             var errors = new List<string>();
-            Settings = XmlDataLoader.LoadSettings(errors);
-            characters = XmlDataLoader.LoadCharacters(errors);
+            Data = XmlDataLoader.LoadAll(Path.Combine(Application.streamingAssetsPath, "Dialog"), errors);
             foreach (string error in errors)
                 Debug.LogError("[Dialog] " + error);
-            Debug.Log($"[Dialog] Loaded {characters.Count} character(s): {string.Join(", ", characters.Select(c => c.Id))}");
+            Debug.Log($"[Dialog] Loaded {Data.Characters.Count} character(s): {string.Join(", ", Data.Characters.Select(c => c.Id))}");
 
-            if (Settings == null)
+            if (Data.Settings == null || Data.Analysis == null)
             {
-                UI.ShowNotice("settings.xml is missing or invalid - see the Console.");
+                UI.ShowNotice("settings.xml or analysis.xml is missing or invalid - see the Console.");
                 enabled = false;
                 return;
             }
@@ -67,14 +69,14 @@ namespace Dialog
 
         void OnDestroy()
         {
-            current?.End("quit");
+            current?.Close("quit");
             if (Instance == this)
                 Instance = null;
         }
 
         public CharacterDefinition FindCharacter(string id)
         {
-            return characters.FirstOrDefault(c => c.Id == id);
+            return Data?.FindCharacter(id);
         }
 
         public void StartConversation(NpcInteractable npc)
@@ -91,7 +93,7 @@ namespace Dialog
 
             npc.FaceTowards(Camera.main != null ? Camera.main.transform.position : npc.transform.position);
 
-            current = new ConversationSession(character, client, Settings.Actor);
+            current = new ConversationSession(character, Data, client);
             SetPlayerControls(false);
             UI.Open(current);
         }
@@ -102,9 +104,10 @@ namespace Dialog
             if (current == null)
                 return;
 
-            current.End(reason);
-            Debug.Log($"[Dialog] Conversation with {current.Character.Name} ended ({current.EndReason}) after {current.PlayerTurns} turn(s).");
-            // TODO (weeks 5-6): run the Evaluator on current.Transcript and show the report.
+            current.Close(reason);
+            Debug.Log($"[Dialog] Conversation with {current.Character.Name} ended ({current.EndReason}) after " +
+                      $"{current.PlayerTurns} turn(s), rapport {current.Rapport.Value:0}, strikes {current.Rapport.Strikes}.");
+            // TODO (M3): run the FinalEvaluator on current.Transcript + current.Turns and show the report.
 
             current = null;
             UI.Close();

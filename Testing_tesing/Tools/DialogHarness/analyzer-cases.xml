@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Test cases for the turn analyzer, run with "dotnet run" and the argument "analyze".
+  Each case gives some conversation context (Npc/Player lines, oldest first; if none,
+  the character's greeting is used) and the player message to label (<Judge>).
+    expect   = behaviour ids that must be found
+    forbid   = behaviour ids that must NOT be found
+    boundary = boundary id that must be reported ("none" = must report none)
+    cue      = noticed | missed | none
+    trigger  = id:well or id:badly that must be reported, or "none" for no trigger at all
+  Attributes left out are not checked.
+-->
+<AnalyzerCases character="maya">
+
+  <!-- ===== Low effort ===== -->
+  <Case id="low_effort_ok" trigger="none" expect="low_effort">
+    <Npc>I play chess most evenings. It's quiet, and I like that.</Npc>
+    <Judge>ok</Judge>
+  </Case>
+  <Case id="low_effort_cool" trigger="none" expect="low_effort" forbid="reflects follow_up">
+    <Npc>I work at the city library, in the archive section.</Npc>
+    <Judge>cool</Judge>
+  </Case>
+  <Case id="low_effort_lol" trigger="none" expect="low_effort">
+    <Npc>Pixel knocked a whole shelf of books over this morning.</Npc>
+    <Judge>lol nice</Judge>
+  </Case>
+
+  <!-- ===== Unsolicited advice ===== -->
+  <Case id="advice_boss" trigger="none" expect="unsolicited_advice" forbid="acknowledges_emotion" cue="missed">
+    <Npc>It's been a long few weeks. Since my colleague left I've been doing two jobs and I haven't had a day off.</Npc>
+    <Judge>You should just tell your boss you need a week off.</Judge>
+  </Case>
+  <Case id="advice_meditation" trigger="none" expect="unsolicited_advice">
+    <Npc>I don't sleep much these days. Too much on my mind.</Npc>
+    <Judge>Have you tried meditation? It would really help you.</Judge>
+  </Case>
+  <Case id="advice_chess" expect="unsolicited_advice">
+    <Npc>I lost my game at the club on Saturday. I misplayed a rook endgame.</Npc>
+    <Judge>You need to study endgames more, honestly. Get a book on rook endings.</Judge>
+  </Case>
+  <Case id="no_advice_negation" trigger="none" forbid="unsolicited_advice dismissive" cue="noticed">
+    <Npc>Work has been a lot lately. I'm running on empty, to be honest.</Npc>
+    <Judge>I won't pretend to know what you should do, but that sounds really draining. How are you holding up?</Judge>
+  </Case>
+
+  <!-- ===== Listening ===== -->
+  <Case id="reflects_quiet" expect="reflects" forbid="changes_subject low_effort">
+    <Npc>I like chess because it's quiet. Nobody talks, nobody interrupts. It's just you and the position.</Npc>
+    <Judge>So for you it's partly about having a space where nobody interrupts you?</Judge>
+  </Case>
+  <Case id="reflects_feeling" expect="reflects" cue="noticed">
+    <Npc>Honestly, I'm tired. I've been covering for a colleague for weeks.</Npc>
+    <Judge>Sounds like you've been carrying a lot more than your share lately.</Judge>
+  </Case>
+  <Case id="follow_up_club" expect="follow_up" forbid="changes_subject">
+    <Npc>On weekends I play at a small chess club near the river.</Npc>
+    <Judge>A club near the river? How long have you been going there?</Judge>
+  </Case>
+  <Case id="follow_up_maps" expect="follow_up" forbid="changes_subject">
+    <Npc>Lately I've been cataloguing a box of old city maps. Some are two hundred years old.</Npc>
+    <Judge>Two hundred years! What's the strangest thing you've found on one of them?</Judge>
+  </Case>
+
+  <!-- ===== Questions ===== -->
+  <Case id="open_question_start" trigger="none" expect="open_question" forbid="low_effort pushy_personal" boundary="none">
+    <Judge>Hi! You looked deep in thought. What were you thinking about?</Judge>
+  </Case>
+  <Case id="plain_question" trigger="none" forbid="pushy_personal unsolicited_advice dismissive hostile" boundary="none">
+    <Npc>I'm an archivist at the city library.</Npc>
+    <Judge>How long have you worked there?</Judge>
+  </Case>
+
+  <!-- ===== Empathy and cues ===== -->
+  <Case id="acknowledge_exhaustion" trigger="none" expect="acknowledges_emotion" forbid="unsolicited_advice" cue="noticed">
+    <Npc>I haven't had a real day off in weeks. The workload doubled after someone quit.</Npc>
+    <Judge>That sounds exhausting. Doing two people's work for weeks would wear anyone down.</Judge>
+  </Case>
+  <Case id="missed_cue_subject_change" trigger="none" expect="changes_subject" cue="missed" forbid="acknowledges_emotion">
+    <Npc>Things have been a lot at work. I'm honestly worn out.</Npc>
+    <Judge>So what's your favourite movie?</Judge>
+  </Case>
+  <Case id="validates" expect="validates" forbid="unsolicited_advice">
+    <Npc>I know it sounds silly, but I'd rather spend Friday night at home with my cat than at a bar.</Npc>
+    <Judge>That doesn't sound silly at all. A quiet night in sounds pretty great after a long week.</Judge>
+  </Case>
+
+  <!-- ===== Dismissive / judgmental / hostile ===== -->
+  <Case id="dismissive_game" expect="dismissive" forbid="validates">
+    <Npc>Losing that endgame really bothered me. I kept replaying it in my head all night.</Npc>
+    <Judge>It's just a game though, why get so worked up?</Judge>
+  </Case>
+  <Case id="dismissive_tired" trigger="none" expect="dismissive" cue="missed">
+    <Npc>I'm exhausted. I've had no day off in weeks.</Npc>
+    <Judge>Everyone's tired, that's just how life is.</Judge>
+  </Case>
+  <Case id="judgmental_alone" expect="judgmental">
+    <Npc>I live alone with my cat, Pixel.</Npc>
+    <Judge>Living alone with a cat at your age is kind of sad, no?</Judge>
+  </Case>
+  <Case id="hostile_boring" expect="hostile">
+    <Npc>I mostly read and play chess in the evenings.</Npc>
+    <Judge>Wow. You are seriously the most boring person I've ever met.</Judge>
+  </Case>
+  <Case id="sarcasm_library" expect="dismissive" forbid="validates open_question">
+    <Npc>I work in the archive of the city library.</Npc>
+    <Judge>Oh wow, a library. How thrilling.</Judge>
+  </Case>
+
+  <!-- ===== Boundaries ===== -->
+  <Case id="pushy_single" trigger="none" expect="pushy_personal" boundary="personal_probing">
+    <Npc>I'm Maya. I work at the library.</Npc>
+    <Judge>So why are you single? Bad breakup?</Judge>
+  </Case>
+  <Case id="pushy_family" expect="pushy_personal" boundary="personal_probing">
+    <Npc>I'd rather not talk about my family, if that's okay.</Npc>
+    <Judge>Come on, just tell me. Do you not get along with your parents or something?</Judge>
+  </Case>
+
+  <!-- ===== Triggers ===== -->
+  <Case id="trigger_chess_well" trigger="chess:well" forbid="dismissive">
+    <Npc>I spend most evenings on chess.</Npc>
+    <Judge>Oh nice, do you play in tournaments too, or mostly online?</Judge>
+  </Case>
+  <Case id="trigger_pixel_badly" trigger="pixel:badly" expect="dismissive">
+    <Npc>My cat Pixel is the only one who's happy to see me when I get home.</Npc>
+    <Judge>Cats are useless honestly, dogs are way better.</Judge>
+  </Case>
+  <Case id="trigger_pixel_well" trigger="pixel:well" forbid="dismissive judgmental">
+    <Npc>My cat Pixel is the only one who's happy to see me when I get home.</Npc>
+    <Judge>Pixel sounds lovely. How long have you had her?</Judge>
+  </Case>
+
+  <!-- ===== Other ===== -->
+  <Case id="flirting_eyes" trigger="none" expect="flirting">
+    <Npc>Sorry, I was miles away. Can I help you with something?</Npc>
+    <Judge>You have really pretty eyes, you know that?</Judge>
+  </Case>
+  <Case id="self_centered" trigger="none" expect="self_centered">
+    <Npc>Work has been busy since my colleague left.</Npc>
+    <Judge>Busy? You think that's busy? My job is way worse, I work sixty hours a week and my boss is a nightmare, let me tell you about last Tuesday...</Judge>
+  </Case>
+  <Case id="self_disclosure" expect="self_disclosure" forbid="self_centered">
+    <Npc>I mostly play endgames. I like positions with very few pieces left.</Npc>
+    <Judge>I played a bit as a kid but never got past the openings. What makes endgames more interesting to you?</Judge>
+  </Case>
+</AnalyzerCases>

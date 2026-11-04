@@ -6,6 +6,7 @@ namespace Dialog
         public string OllamaUrl;
         public string KeepAlive;
         public ModelRole Actor;
+        public ModelRole Analyzer;
         public ModelRole Evaluator;
     }
 

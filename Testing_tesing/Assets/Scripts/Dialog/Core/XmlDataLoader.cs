@@ -6,21 +6,44 @@ using System.Linq;
 using System.Xml;
 using System.Xml.Linq;
 using System.Xml.Schema;
-using UnityEngine;
 
 namespace Dialog
 {
-    // Reads the game's XML data from StreamingAssets/Dialog, validating every file
+    // Everything the game reads from XML.
+    public class GameData
+    {
+        public GameSettings Settings;
+        public AnalysisDefinition Analysis;
+        public List<CharacterDefinition> Characters = new List<CharacterDefinition>();
+
+        public CharacterDefinition FindCharacter(string id)
+        {
+            return Characters.FirstOrDefault(c => c.Id == id);
+        }
+    }
+
+    // Reads the game's XML data (StreamingAssets/Dialog in Unity), validating every file
     // against its XSD first. Invalid files are skipped and reported, never half-loaded.
+    // The data folder is passed in, so the console harness can load the same files.
     public static class XmlDataLoader
     {
-        public static string DataRoot => Path.Combine(Application.streamingAssetsPath, "Dialog");
-        static string SchemaDir => Path.Combine(DataRoot, "Schemas");
-
-        public static GameSettings LoadSettings(List<string> errors)
+        public static GameData LoadAll(string dataRoot, List<string> errors)
         {
-            string path = Path.Combine(DataRoot, "settings.xml");
-            XDocument doc = LoadValidated(path, Path.Combine(SchemaDir, "settings.xsd"), errors);
+            var data = new GameData
+            {
+                Settings = LoadSettings(dataRoot, errors),
+                Analysis = LoadAnalysis(dataRoot, errors),
+                Characters = LoadCharacters(dataRoot, errors),
+            };
+            if (data.Analysis != null)
+                CheckCrossReferences(data, errors);
+            return data;
+        }
+
+        public static GameSettings LoadSettings(string dataRoot, List<string> errors)
+        {
+            string path = Path.Combine(dataRoot, "settings.xml");
+            XDocument doc = LoadValidated(path, Schema(dataRoot, "settings.xsd"), errors);
             if (doc == null)
                 return null;
 
@@ -31,21 +54,67 @@ namespace Dialog
                 OllamaUrl = ((string)ollama.Attribute("url")).TrimEnd('/'),
                 KeepAlive = (string)ollama.Attribute("keepAlive") ?? "30m",
                 Actor = ReadModelRole(root.Element("Actor")),
+                Analyzer = ReadModelRole(root.Element("Analyzer")),
                 Evaluator = ReadModelRole(root.Element("Evaluator")),
             };
         }
 
-        public static List<CharacterDefinition> LoadCharacters(List<string> errors)
+        public static AnalysisDefinition LoadAnalysis(string dataRoot, List<string> errors)
+        {
+            string path = Path.Combine(dataRoot, "analysis.xml");
+            XDocument doc = LoadValidated(path, Schema(dataRoot, "analysis.xsd"), errors);
+            if (doc == null)
+                return null;
+
+            XElement root = doc.Root;
+            XElement scoring = root.Element("Scoring");
+            XElement moods = root.Element("Moods");
+            return new AnalysisDefinition
+            {
+                Behaviours = root.Element("Behaviours").Elements("Behaviour").Select(e => new BehaviourDefinition
+                {
+                    Id = (string)e.Attribute("id"),
+                    Polarity = (string)e.Attribute("polarity"),
+                    Rapport = (int)e.Attribute("rapport"),
+                    Criterion = (string)e.Attribute("criterion"),
+                    AutoMaxWords = (int?)e.Attribute("autoMaxWords") ?? 0,
+                    Description = Text(e, "Description"),
+                    Examples = e.Elements("Example").Select(x => x.Value.Trim()).ToList(),
+                }).ToList(),
+                Scoring = new AnalysisScoring
+                {
+                    MaxTurnChange = (int?)scoring.Attribute("maxTurnChange") ?? 15,
+                    TriggerWell = (int)scoring.Element("Trigger").Attribute("well"),
+                    TriggerRepeatWell = (int?)scoring.Element("Trigger").Attribute("repeatWell") ?? 0,
+                    TriggerBadly = (int)scoring.Element("Trigger").Attribute("badly"),
+                    BoundaryLow = (int)scoring.Element("Boundary").Attribute("low"),
+                    BoundaryMedium = (int)scoring.Element("Boundary").Attribute("medium"),
+                    BoundaryHigh = (int)scoring.Element("Boundary").Attribute("high"),
+                    CueNoticed = (int)scoring.Element("Cue").Attribute("noticed"),
+                    CueMissed = (int)scoring.Element("Cue").Attribute("missed"),
+                },
+                Moods = new MoodNotes
+                {
+                    Cold = Text(moods, "Cold"),
+                    Neutral = Text(moods, "Neutral"),
+                    Warm = Text(moods, "Warm"),
+                    LastWarning = Text(moods, "LastWarning"),
+                    Leave = Text(moods, "Leave"),
+                },
+            };
+        }
+
+        public static List<CharacterDefinition> LoadCharacters(string dataRoot, List<string> errors)
         {
             var characters = new List<CharacterDefinition>();
-            string dir = Path.Combine(DataRoot, "Characters");
+            string dir = Path.Combine(dataRoot, "Characters");
             if (!Directory.Exists(dir))
             {
                 errors.Add($"Character folder not found: {dir}");
                 return characters;
             }
 
-            string xsd = Path.Combine(SchemaDir, "character.xsd");
+            string xsd = Schema(dataRoot, "character.xsd");
             foreach (string file in Directory.GetFiles(dir, "*.xml").OrderBy(f => f))
             {
                 XDocument doc = LoadValidated(file, xsd, errors);
@@ -65,6 +134,33 @@ namespace Dialog
                 characters.Add(character);
             }
             return characters;
+        }
+
+        static string Schema(string dataRoot, string file)
+        {
+            return Path.Combine(dataRoot, "Schemas", file);
+        }
+
+        // References between files, which a single-document XSD cannot check.
+        static void CheckCrossReferences(GameData data, List<string> errors)
+        {
+            foreach (CharacterDefinition c in data.Characters)
+            {
+                foreach (string id in c.BehaviourOverrides.Keys.ToList())
+                {
+                    if (data.Analysis.FindBehaviour(id) != null)
+                        continue;
+                    errors.Add($"{c.SourceFile}: override for unknown behaviour '{id}' (not in analysis.xml), ignored.");
+                    c.BehaviourOverrides.Remove(id);
+                }
+
+                var criteria = new HashSet<string>(c.Rubric.Criteria.Select(cr => cr.Id));
+                foreach (BehaviourDefinition b in data.Analysis.Behaviours)
+                {
+                    if (b.Criterion != null && !criteria.Contains(b.Criterion))
+                        DialogLog.Warning($"{c.SourceFile}: rubric has no criterion '{b.Criterion}', behaviour '{b.Id}' will not count towards a criterion.");
+                }
+            }
         }
 
         // Returns null (and adds to errors) if the file is missing, malformed or breaks the schema.
@@ -113,8 +209,14 @@ namespace Dialog
                 ok = false;
             }
 
+            if (c.Rapport.ColdBelow >= c.Rapport.WarmAbove)
+            {
+                errors.Add($"{c.SourceFile}: RapportRules coldBelow ({c.Rapport.ColdBelow}) must be lower than warmAbove ({c.Rapport.WarmAbove}).");
+                ok = false;
+            }
+
             float weightSum = c.Rubric.Criteria.Sum(cr => cr.Weight);
-            if (Mathf.Abs(weightSum - 1f) > 0.01f)
+            if (Math.Abs(weightSum - 1f) > 0.01f)
             {
                 errors.Add($"{c.SourceFile}: rubric weights add up to {weightSum:0.00}, expected 1.00.");
                 ok = false;
@@ -202,6 +304,21 @@ namespace Dialog
                 MaxTurns = (int)rules.Attribute("maxTurns"),
                 MaxBoundaryStrikes = (int?)rules.Attribute("maxBoundaryStrikes") ?? 2,
             };
+
+            XElement rapport = root.Element("RapportRules");
+            c.Rapport = new RapportRules
+            {
+                Start = (int?)rapport?.Attribute("start") ?? 40,
+                ColdBelow = (int?)rapport?.Attribute("coldBelow") ?? 25,
+                WarmAbove = (int?)rapport?.Attribute("warmAbove") ?? 65,
+            };
+
+            XElement overrides = root.Element("BehaviourOverrides");
+            if (overrides != null)
+            {
+                foreach (XElement o in overrides.Elements("Override"))
+                    c.BehaviourOverrides[(string)o.Attribute("behaviour")] = (int)o.Attribute("rapport");
+            }
 
             XElement rubric = root.Element("EvaluationRubric");
             c.Rubric = new EvaluationRubric

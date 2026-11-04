@@ -52,6 +52,14 @@
 
   <ConversationRules minTurns="8" maxTurns="15" maxBoundaryStrikes="2"/>
 
+  <RapportRules start="35" coldBelow="25" warmAbove="65"/>
+
+  <!-- Maya is reserved: flirting early is unwelcome, small talk wears thin -->
+  <BehaviourOverrides>
+    <Override behaviour="flirting" rapport="-4"/>
+    <Override behaviour="low_effort" rapport="-4"/>
+  </BehaviourOverrides>
+
   <EvaluationRubric totalScore="100">
     <Criterion id="active_listening" label="Active Listening" weight="0.25">
       <Description>Does the player reflect or build on what Maya actually said instead of changing the subject?</Description>

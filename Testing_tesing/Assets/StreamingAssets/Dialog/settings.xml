@@ -4,6 +4,8 @@
   <Ollama url="http://localhost:11434" keepAlive="30m"/>
   <!-- Creative and varied: plays the character -->
   <Actor model="gemma4:e4b" temperature="0.8" contextLength="8192" maxTokens="200"/>
-  <!-- Strict and repeatable: scores the conversation -->
+  <!-- Labels every player message (runs after each reply) -->
+  <Analyzer model="gemma4:e4b" temperature="0.1" contextLength="8192" maxTokens="400"/>
+  <!-- Strict and repeatable: scores the whole conversation at the end -->
   <Evaluator model="gemma4:e4b" temperature="0.1" contextLength="8192" maxTokens="1024"/>
 </GameSettings>

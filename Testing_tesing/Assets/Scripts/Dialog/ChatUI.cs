@@ -6,9 +6,9 @@ using UnityEngine.UI;
 
 namespace Dialog
 {
-    // Conversation window, interaction prompt and crosshair. The whole UI is built in
-    // code so the scene needs nothing but this component; it is a functional placeholder
-    // until the real UI (live bar, feedback screen) is designed.
+    // Conversation window, rapport bar, interaction prompt and crosshair. The whole UI is
+    // built in code so the scene needs nothing but this component; it is a functional
+    // placeholder until the real UI (feedback screen etc.) is designed.
     // Runs early so the UI exists before DialogManager.Awake reports anything.
     [DefaultExecutionOrder(-100)]
     public class ChatUI : MonoBehaviour
@@ -20,6 +20,14 @@ namespace Dialog
         static readonly Color PlayerTextColor = new Color(0.85f, 0.85f, 0.85f);
         static readonly Color NpcTextColor = new Color(1f, 0.86f, 0.55f);
         static readonly Color MutedColor = new Color(0.6f, 0.6f, 0.62f);
+        static readonly Color ColdColor = new Color(0.35f, 0.55f, 0.95f);
+        static readonly Color NeutralColor = new Color(0.72f, 0.72f, 0.74f);
+        static readonly Color WarmColor = new Color(1f, 0.68f, 0.28f);
+        static readonly Color PipOffColor = new Color(1f, 1f, 1f, 0.15f);
+        static readonly Color PipOnColor = new Color(0.9f, 0.25f, 0.25f);
+
+        // Rapport points per second the bar moves while catching up with the real value.
+        const float BarSpeed = 30f;
 
         Font font;
         GameObject chatPanel;
@@ -35,10 +43,22 @@ namespace Dialog
         InputField inputField;
         Button sendButton;
 
+        GameObject rapportPanel;
+        RectTransform barFill;
+        Image barFillImage;
+        RectTransform coldTick;
+        RectTransform warmTick;
+        RectTransform pipRow;
+        Image[] strikePips = new Image[0];
+        float shownRapport;
+
         ConversationSession session;
+        Text lastPlayerLine;
         Text streamingLine;
         string streamingText;
+        string pendingText;
         bool confirmLeave;
+        bool queuedSubmit;
         bool scrollToBottom;
         bool focusInput;
 
@@ -48,6 +68,7 @@ namespace Dialog
             EnsureEventSystem();
             BuildUI();
             chatPanel.SetActive(false);
+            rapportPanel.SetActive(false);
             SetInteractPrompt(null);
             ShowNotice(null);
         }
@@ -70,7 +91,15 @@ namespace Dialog
         public void Open(ConversationSession newSession)
         {
             session = newSession;
+            session.NpcReplyStarted += OnNpcReplyStarted;
+            session.NpcToken += OnNpcToken;
+            session.NpcReplyCompleted += OnNpcReplyCompleted;
+            session.ReplyFailed += OnReplyFailed;
+            session.TurnAnalyzed += OnTurnAnalyzed;
+            session.Ended += OnEnded;
+
             confirmLeave = false;
+            queuedSubmit = false;
             foreach (Transform child in logContent)
                 Destroy(child.gameObject);
 
@@ -79,7 +108,9 @@ namespace Dialog
             foreach (ChatMessage message in session.Transcript)
                 AddLine(message.role, message.content);
 
+            SetUpRapportBar();
             chatPanel.SetActive(true);
+            rapportPanel.SetActive(true);
             crosshair.gameObject.SetActive(false);
             SetInteractPrompt(null);
             inputField.text = "";
@@ -91,9 +122,20 @@ namespace Dialog
 
         public void Close()
         {
+            if (session != null)
+            {
+                session.NpcReplyStarted -= OnNpcReplyStarted;
+                session.NpcToken -= OnNpcToken;
+                session.NpcReplyCompleted -= OnNpcReplyCompleted;
+                session.ReplyFailed -= OnReplyFailed;
+                session.TurnAnalyzed -= OnTurnAnalyzed;
+                session.Ended -= OnEnded;
+            }
             session = null;
             streamingLine = null;
+            lastPlayerLine = null;
             chatPanel.SetActive(false);
+            rapportPanel.SetActive(false);
             crosshair.gameObject.SetActive(true);
         }
 
@@ -109,6 +151,8 @@ namespace Dialog
                 focusInput = false;
                 FocusInput();
             }
+
+            UpdateRapportBar();
 
             Keyboard keyboard = Keyboard.current;
             if (keyboard != null && keyboard.escapeKey.wasPressedThisFrame)
@@ -128,7 +172,7 @@ namespace Dialog
 
         void Submit()
         {
-            if (session == null || session.IsOver || session.IsWaitingForReply)
+            if (session == null || session.IsOver || session.IsActorBusy)
                 return;
 
             string text = inputField.text.Trim();
@@ -138,47 +182,91 @@ namespace Dialog
                 return;
             }
 
-            confirmLeave = false;
-            inputField.text = "";
-            AddLine("user", text);
+            // The analyzer is still labelling the previous message: send as soon as it is done.
+            if (session.IsAnalyzing)
+            {
+                queuedSubmit = true;
+                return;
+            }
 
+            confirmLeave = false;
+            pendingText = text;
+            if (!session.SendPlayerMessage(text))
+                return;
+            inputField.text = "";
+            lastPlayerLine = AddLine("user", text);
+            RefreshState();
+        }
+
+        void OnNpcReplyStarted()
+        {
             streamingText = "";
             streamingLine = AddLine("assistant", "...");
             SetStatus($"{session.Character.Name} is thinking...");
+            RefreshState();
+        }
 
-            ConversationSession active = session;
-            session.SendPlayerMessage(text,
-                token =>
-                {
-                    if (session != active || streamingLine == null)
-                        return;
-                    streamingText += token;
-                    streamingLine.text = FormatLine("assistant", streamingText);
-                    scrollToBottom = true;
-                },
-                reply =>
-                {
-                    if (session != active)
-                        return;
-                    streamingLine.text = FormatLine("assistant", reply);
-                    streamingLine = null;
-                    SetStatus(session.IsOver ? "The conversation has ended. Press Esc to close." : "");
-                    RefreshState();
-                    FocusInput();
-                },
-                error =>
-                {
-                    if (session != active)
-                        return;
-                    Destroy(streamingLine.gameObject);
-                    streamingLine = null;
-                    // Give the message back so the player can resend it.
-                    inputField.text = text;
-                    SetStatus("Could not get a reply: " + error);
-                    Debug.LogError("[Dialog] Actor LLM error: " + error);
-                    RefreshState();
-                    FocusInput();
-                });
+        void OnNpcToken(string token)
+        {
+            if (streamingLine == null)
+                return;
+            streamingText += token;
+            streamingLine.text = FormatLine("assistant", streamingText);
+            scrollToBottom = true;
+        }
+
+        void OnNpcReplyCompleted(string reply)
+        {
+            if (streamingLine != null)
+                streamingLine.text = FormatLine("assistant", reply);
+            streamingLine = null;
+            SetStatus("");
+            RefreshState();
+            FocusInput();
+        }
+
+        void OnReplyFailed(string error)
+        {
+            if (streamingLine != null)
+                Destroy(streamingLine.gameObject);
+            if (lastPlayerLine != null)
+                Destroy(lastPlayerLine.gameObject);
+            streamingLine = null;
+            lastPlayerLine = null;
+            // Give the message back so the player can resend it.
+            inputField.text = pendingText;
+            SetStatus("Could not get a reply: " + error);
+            Debug.LogError("[Dialog] Actor LLM error: " + error);
+            RefreshState();
+            FocusInput();
+        }
+
+        void OnTurnAnalyzed(TurnAnalysis turn)
+        {
+            if (!turn.Failed)
+            {
+                string found = string.Join(", ", turn.Breakdown);
+                // Summary on the first line (what the Console list shows), raw JSON below it.
+                Debug.Log($"[Analyzer] turn {turn.Turn}: {(found.Length > 0 ? found : "nothing")} -> rapport {turn.RapportAfter:0} ({turn.RapportDelta:+0;-0;0})\n" +
+                          $"Player: {turn.PlayerMessage}\n{turn.RawJson}");
+            }
+            UpdateStrikePips();
+            RefreshState();
+
+            if (queuedSubmit)
+            {
+                queuedSubmit = false;
+                Submit();
+            }
+        }
+
+        void OnEnded(string reason)
+        {
+            queuedSubmit = false;
+            string name = session.Character.Name;
+            SetStatus(reason == ConversationSession.EndBoundaryStrikes
+                ? $"{name} has ended the conversation. Press Esc to close."
+                : "The conversation has ended. Press Esc to close.");
             RefreshState();
         }
 
@@ -203,7 +291,8 @@ namespace Dialog
                 (session.ReachedMinTurns ? "" : $"   ·   at least {c.Rules.MinTurns} before leaving") +
                 $"   ·   {c.Difficulty}";
 
-            bool canType = !session.IsOver && !session.IsWaitingForReply;
+            // Typing is allowed while the analyzer works; sending waits for it (queuedSubmit).
+            bool canType = !session.IsOver && !session.IsActorBusy;
             inputField.interactable = canType;
             sendButton.interactable = canType;
             hintText.text = session.IsOver ? "Esc  close" : "Enter  send      Esc  leave";
@@ -245,6 +334,50 @@ namespace Dialog
                 Submit();
         }
 
+        // ---------- Rapport bar ----------
+
+        void SetUpRapportBar()
+        {
+            RapportRules rules = session.Character.Rapport;
+            shownRapport = session.Rapport.Value;
+            SetTick(coldTick, rules.ColdBelow);
+            SetTick(warmTick, rules.WarmAbove);
+
+            foreach (Transform child in pipRow)
+                Destroy(child.gameObject);
+            strikePips = new Image[session.Rapport.MaxStrikes];
+            for (int i = 0; i < strikePips.Length; i++)
+            {
+                strikePips[i] = CreatePanel("Strike", pipRow, PipOffColor);
+                strikePips[i].gameObject.AddComponent<LayoutElement>().preferredWidth = 14;
+            }
+            UpdateStrikePips();
+            UpdateRapportBar();
+        }
+
+        // Eases the bar towards the real value, like a chess evaluation bar settling.
+        void UpdateRapportBar()
+        {
+            shownRapport = Mathf.MoveTowards(shownRapport, session.Rapport.Value, BarSpeed * Time.deltaTime);
+            float t = shownRapport / 100f;
+            barFill.anchorMax = new Vector2(1f, t);
+            barFillImage.color = t < 0.5f
+                ? Color.Lerp(ColdColor, NeutralColor, t * 2f)
+                : Color.Lerp(NeutralColor, WarmColor, (t - 0.5f) * 2f);
+        }
+
+        void UpdateStrikePips()
+        {
+            for (int i = 0; i < strikePips.Length; i++)
+                strikePips[i].color = i < session.Rapport.Strikes ? PipOnColor : PipOffColor;
+        }
+
+        static void SetTick(RectTransform tick, float value)
+        {
+            tick.anchorMin = new Vector2(0f, value / 100f);
+            tick.anchorMax = new Vector2(1f, value / 100f);
+        }
+
         // ---------- UI construction ----------
 
         void EnsureEventSystem()
@@ -284,6 +417,60 @@ namespace Dialog
             Place(noticeText.rectTransform, new Vector2(0.5f, 0.95f), new Vector2(0.5f, 0.95f), new Vector2(1200, 40));
 
             BuildChatPanel(root);
+            BuildRapportBar(root);
+        }
+
+        // Vertical bar left of the chat panel: fill = rapport, ticks = cold/warm thresholds,
+        // red pips underneath = boundary strikes.
+        void BuildRapportBar(RectTransform root)
+        {
+            rapportPanel = CreatePanel("Rapport", root, PanelColor).gameObject;
+            RectTransform panel = rapportPanel.GetComponent<RectTransform>();
+            panel.anchorMin = new Vector2(0.505f, 0.05f);
+            panel.anchorMax = new Vector2(0.54f, 0.95f);
+            panel.offsetMin = panel.offsetMax = Vector2.zero;
+
+            Image track = CreatePanel("Track", panel, LogColor);
+            RectTransform trackRect = track.rectTransform;
+            trackRect.anchorMin = new Vector2(0.25f, 0f);
+            trackRect.anchorMax = new Vector2(0.75f, 1f);
+            trackRect.offsetMin = new Vector2(0, 90);
+            trackRect.offsetMax = new Vector2(0, -16);
+
+            barFillImage = CreatePanel("Fill", trackRect, NeutralColor);
+            barFill = barFillImage.rectTransform;
+            barFill.anchorMin = Vector2.zero;
+            barFill.anchorMax = new Vector2(1f, 0.5f);
+            barFill.offsetMin = barFill.offsetMax = Vector2.zero;
+
+            coldTick = CreatePanel("Cold Tick", trackRect, new Color(1f, 1f, 1f, 0.35f)).rectTransform;
+            coldTick.sizeDelta = new Vector2(12, 2);
+            warmTick = CreatePanel("Warm Tick", trackRect, new Color(1f, 1f, 1f, 0.35f)).rectTransform;
+            warmTick.sizeDelta = new Vector2(12, 2);
+
+            var pips = new GameObject("Strikes", typeof(RectTransform), typeof(HorizontalLayoutGroup));
+            pipRow = pips.GetComponent<RectTransform>();
+            pipRow.SetParent(panel, false);
+            pipRow.anchorMin = new Vector2(0f, 0f);
+            pipRow.anchorMax = new Vector2(1f, 0f);
+            pipRow.pivot = new Vector2(0.5f, 0f);
+            pipRow.sizeDelta = new Vector2(0, 14);
+            pipRow.anchoredPosition = new Vector2(0, 50);
+            var pipLayout = pips.GetComponent<HorizontalLayoutGroup>();
+            pipLayout.spacing = 6;
+            pipLayout.childAlignment = TextAnchor.MiddleCenter;
+            pipLayout.childControlWidth = pipLayout.childControlHeight = true;
+            pipLayout.childForceExpandWidth = false;
+
+            Text label = CreateText("Label", panel, 16, MutedColor);
+            label.text = "Rapport";
+            label.alignment = TextAnchor.MiddleCenter;
+            RectTransform labelRect = label.rectTransform;
+            labelRect.anchorMin = new Vector2(0f, 0f);
+            labelRect.anchorMax = new Vector2(1f, 0f);
+            labelRect.pivot = new Vector2(0.5f, 0f);
+            labelRect.sizeDelta = new Vector2(0, 24);
+            labelRect.anchoredPosition = new Vector2(0, 16);
         }
 
         void BuildChatPanel(RectTransform root)

@@ -188,6 +188,39 @@
     <xs:attribute name="maxBoundaryStrikes" type="xs:positiveInteger" default="2"/>
   </xs:complexType>
 
+  <xs:simpleType name="Percent">
+    <xs:restriction base="xs:integer">
+      <xs:minInclusive value="0"/>
+      <xs:maxInclusive value="100"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- Rapport runs 0..100. Below coldBelow the character turns guarded, above warmAbove they open up. -->
+  <xs:complexType name="RapportRulesType">
+    <xs:attribute name="start" type="Percent" default="40"/>
+    <xs:attribute name="coldBelow" type="Percent" default="25"/>
+    <xs:attribute name="warmAbove" type="Percent" default="65"/>
+  </xs:complexType>
+
+  <!-- Per-character points for behaviours from analysis.xml (ids are checked by the game) -->
+  <xs:complexType name="BehaviourOverridesType">
+    <xs:sequence>
+      <xs:element name="Override" maxOccurs="unbounded">
+        <xs:complexType>
+          <xs:attribute name="behaviour" type="IdType" use="required"/>
+          <xs:attribute name="rapport" use="required">
+            <xs:simpleType>
+              <xs:restriction base="xs:integer">
+                <xs:minInclusive value="-20"/>
+                <xs:maxInclusive value="20"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:attribute>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+
   <xs:complexType name="CriterionType">
     <xs:sequence>
       <xs:element name="Description" type="NonEmptyText"/>
@@ -224,6 +257,8 @@
         <!-- First line the character says when the player walks up -->
         <xs:element name="Greeting" type="NonEmptyText"/>
         <xs:element name="ConversationRules" type="ConversationRulesType"/>
+        <xs:element name="RapportRules" type="RapportRulesType" minOccurs="0"/>
+        <xs:element name="BehaviourOverrides" type="BehaviourOverridesType" minOccurs="0"/>
         <xs:element name="EvaluationRubric" type="EvaluationRubricType"/>
       </xs:sequence>
       <xs:attribute name="id" type="IdType" use="required"/>
@@ -243,6 +278,10 @@
     <xs:unique name="UniqueCueId">
       <xs:selector xpath="EmotionalCues/Cue"/>
       <xs:field xpath="@id"/>
+    </xs:unique>
+    <xs:unique name="UniqueOverride">
+      <xs:selector xpath="BehaviourOverrides/Override"/>
+      <xs:field xpath="@behaviour"/>
     </xs:unique>
     <xs:unique name="UniqueCriterionId">
       <xs:selector xpath="EvaluationRubric/Criterion"/>

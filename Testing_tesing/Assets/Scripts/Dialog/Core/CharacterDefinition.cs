@@ -30,7 +30,17 @@ namespace Dialog
         public string SecretGoal;
         public string Greeting;
         public ConversationRules Rules;
+        public RapportRules Rapport;
+        // behaviour id -> rapport points, replacing the default from analysis.xml
+        public Dictionary<string, int> BehaviourOverrides = new Dictionary<string, int>();
         public EvaluationRubric Rubric;
+    }
+
+    public class RapportRules
+    {
+        public int Start;
+        public int ColdBelow;
+        public int WarmAbove;
     }
 
     // Big Five traits, each 0..1.

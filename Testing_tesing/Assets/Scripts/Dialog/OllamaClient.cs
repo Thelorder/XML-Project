@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using UnityEngine;
@@ -7,50 +6,10 @@ using UnityEngine.Networking;
 
 namespace Dialog
 {
-    [Serializable]
-    public class ChatMessage
+    // ILlmClient over UnityWebRequest. Streams the reply token by token so text appears
+    // as soon as the model starts generating. All callbacks run on the main thread.
+    public class OllamaClient : ILlmClient
     {
-        public string role; // system | user | assistant
-        public string content;
-
-        public ChatMessage(string role, string content)
-        {
-            this.role = role;
-            this.content = content;
-        }
-    }
-
-    // Minimal client for Ollama's /api/chat. Streams the reply token by token so text
-    // appears as soon as the model starts generating. All callbacks run on the main thread.
-    public class OllamaClient
-    {
-        [Serializable]
-        class ChatOptions
-        {
-            public float temperature;
-            public int num_ctx;
-            public int num_predict;
-        }
-
-        [Serializable]
-        class ChatRequest
-        {
-            public string model;
-            public ChatMessage[] messages;
-            public bool stream;
-            public bool think;
-            public string keep_alive;
-            public ChatOptions options;
-        }
-
-        [Serializable]
-        class ChatChunk
-        {
-            public ChatMessage message;
-            public bool done;
-            public string error;
-        }
-
         readonly string baseUrl;
         readonly string keepAlive;
 
@@ -61,11 +20,10 @@ namespace Dialog
         }
 
         // Loads the model into VRAM ahead of time; the first load can take 30+ seconds.
-        // Uses the role's own options: a different num_ctx would make Ollama reload the model later.
-        public void Warmup(ModelRole role, Action<bool> onDone = null)
+        public void Warmup(ModelRole role, Action<bool> onDone)
         {
-            ChatRequest request = CreateRequest(role, new ChatMessage[0], false);
-            UnityWebRequest web = CreatePost("/api/chat", JsonUtility.ToJson(request), new DownloadHandlerBuffer());
+            string json = OllamaProtocol.BuildChatRequest(new LlmRequest { Role = role }, keepAlive, false);
+            UnityWebRequest web = CreatePost(json, new DownloadHandlerBuffer());
             web.SendWebRequest().completed += _ =>
             {
                 bool ok = web.result == UnityWebRequest.Result.Success;
@@ -76,62 +34,42 @@ namespace Dialog
             };
         }
 
-        // Returns the request so the caller can Abort() it (e.g. the player walks away).
-        public UnityWebRequest StreamChat(ModelRole role, IList<ChatMessage> messages,
-            Action<string> onToken, Action<string> onComplete, Action<string> onError)
+        public ILlmCall Chat(LlmRequest request, Action<string> onToken, Action<string> onComplete, Action<string> onError)
         {
-            ChatRequest request = CreateRequest(role, new List<ChatMessage>(messages).ToArray(), true);
-
             var reply = new StringBuilder();
             string streamError = null;
             var handler = new LineStreamHandler(line =>
             {
-                ChatChunk chunk;
-                try { chunk = JsonUtility.FromJson<ChatChunk>(line); }
-                catch (ArgumentException) { return; }
-
-                if (!string.IsNullOrEmpty(chunk.error))
-                    streamError = chunk.error;
-                else if (chunk.message != null && !string.IsNullOrEmpty(chunk.message.content))
+                if (!OllamaProtocol.TryParseChunk(line, out string content, out _, out string error))
+                    return;
+                if (!string.IsNullOrEmpty(error))
+                    streamError = error;
+                else if (!string.IsNullOrEmpty(content))
                 {
-                    reply.Append(chunk.message.content);
-                    onToken?.Invoke(chunk.message.content);
+                    reply.Append(content);
+                    onToken?.Invoke(content);
                 }
             });
 
-            UnityWebRequest web = CreatePost("/api/chat", JsonUtility.ToJson(request), handler);
-            web.SendWebRequest().completed += _ =>
+            var call = new Call(CreatePost(OllamaProtocol.BuildChatRequest(request, keepAlive, true), handler));
+            call.Web.SendWebRequest().completed += _ =>
             {
-                if (web.result == UnityWebRequest.Result.Success && streamError == null)
-                    onComplete?.Invoke(reply.ToString());
-                else if (web.error != "Request aborted")
-                    onError?.Invoke(streamError ?? $"{web.error} ({baseUrl})");
+                UnityWebRequest web = call.Web;
+                if (!call.Aborted)
+                {
+                    if (web.result == UnityWebRequest.Result.Success && streamError == null)
+                        onComplete?.Invoke(reply.ToString());
+                    else
+                        onError?.Invoke(streamError ?? $"{web.error} ({baseUrl})");
+                }
                 web.Dispose();
             };
-            return web;
+            return call;
         }
 
-        ChatRequest CreateRequest(ModelRole role, ChatMessage[] messages, bool stream)
+        UnityWebRequest CreatePost(string json, DownloadHandler download)
         {
-            return new ChatRequest
-            {
-                model = role.Model,
-                messages = messages,
-                stream = stream,
-                think = false,
-                keep_alive = keepAlive,
-                options = new ChatOptions
-                {
-                    temperature = role.Temperature,
-                    num_ctx = role.ContextLength,
-                    num_predict = role.MaxTokens,
-                },
-            };
-        }
-
-        UnityWebRequest CreatePost(string path, string json, DownloadHandler download)
-        {
-            var web = new UnityWebRequest(baseUrl + path, UnityWebRequest.kHttpVerbPOST)
+            var web = new UnityWebRequest(baseUrl + OllamaProtocol.ChatPath, UnityWebRequest.kHttpVerbPOST)
             {
                 uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(json)),
                 downloadHandler = download,
@@ -139,6 +77,25 @@ namespace Dialog
             };
             web.SetRequestHeader("Content-Type", "application/json");
             return web;
+        }
+
+        class Call : ILlmCall
+        {
+            public readonly UnityWebRequest Web;
+            public bool Aborted { get; private set; }
+
+            public Call(UnityWebRequest web)
+            {
+                Web = web;
+            }
+
+            public void Abort()
+            {
+                if (Aborted)
+                    return;
+                Aborted = true;
+                Web.Abort();
+            }
         }
 
         // Ollama streams newline-delimited JSON. Buffers raw bytes so a UTF-8 character
